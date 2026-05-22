@@ -51,9 +51,7 @@ export async function sendRegisterOtp(req, res) {
   } catch (error) {
     console.error("REGISTER OTP SEND ERROR:", error);
     return res.status(502).json({
-      message:
-        "Email service is not reachable from this deployment. Use an HTTP email provider API such as Resend or Brevo, or enable SMTP on your hosting plan.",
-      detail: process.env.NODE_ENV === "production" ? undefined : error.message,
+      message: error.message || "OTP email send failed",
     });
   }
 }
