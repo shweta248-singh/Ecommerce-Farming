@@ -14,18 +14,32 @@ for (const key of requiredEnv) {
   }
 }
 
+const smtpPort = Number(process.env.SMTP_PORT || 587);
+const smtpSecure =
+  process.env.SMTP_SECURE === undefined
+    ? smtpPort === 465
+    : String(process.env.SMTP_SECURE).toLowerCase() === "true";
+const smtpRequireTls =
+  process.env.SMTP_REQUIRE_TLS === undefined
+    ? smtpPort === 587
+    : String(process.env.SMTP_REQUIRE_TLS).toLowerCase() === "true";
+
 export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: Number(process.env.SMTP_PORT || 465),
-  secure: true,
+  port: smtpPort,
+  secure: smtpSecure,
+  requireTLS: smtpRequireTls,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
   family: 4,
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
+  connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT || 15000),
+  greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT || 15000),
+  socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT || 15000),
+  tls: {
+    servername: process.env.SMTP_HOST || "smtp.gmail.com",
+  },
 });
 
 export const verifyMailer = async () => {

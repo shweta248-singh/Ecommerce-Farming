@@ -107,6 +107,7 @@ app.use("/api/auth", authRoutes);
 
 // ✅ OTP routes: /api/auth/otp/register/send-otp
 app.use("/api/auth/otp", authOtpRoutes);
+app.use("/api/auth", authOtpRoutes);
 
 // ✅ GST routes: /api/auth/seller/verify-gst
 app.use("/api/auth/seller", authGstRoutes);
