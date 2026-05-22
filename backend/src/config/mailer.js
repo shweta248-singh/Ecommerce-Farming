@@ -16,23 +16,16 @@ for (const key of requiredEnv) {
 
 export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
-
-  port: Number(process.env.SMTP_PORT || 587),
-
-  secure: false,
-
-  requireTLS: true,
-
+  port: Number(process.env.SMTP_PORT || 465),
+  secure: true,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-
   family: 4,
-
-  tls: {
-    rejectUnauthorized: false,
-  },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
 });
 
 export const verifyMailer = async () => {
