@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { db } from '../lib/mongoClient';
 import { useLanguage } from '../context/LanguageContext';
 import CollectiveBuyModal from '../components/CollectiveBuyModal';
+import { getCollectivePreview } from '../services/collectiveBuyService';
 import '../components/landing.css';
 
 const escapeSvgText = (value = '') =>
@@ -35,6 +36,7 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [showCollectiveModal, setShowCollectiveModal] = useState(false);
+  const [collectivePreview, setCollectivePreview] = useState(null);
 
   useEffect(() => {
     fetchProduct();
@@ -54,6 +56,12 @@ export default function ProductDetail() {
       
       if (data) {
         setProduct(data);
+        try {
+          const preview = await getCollectivePreview(data.id);
+          setCollectivePreview(preview);
+        } catch {
+          setCollectivePreview(null);
+        }
       } else if (error) {
         console.error("Error fetching product:", error.message);
       }
@@ -203,6 +211,16 @@ export default function ProductDetail() {
             <p style={{ marginTop: '8px', color: '#92400e', fontWeight: 700 }}>
               Buy Together & Save Up To 25%
             </p>
+            {collectivePreview && (
+              <div className="cb-product-summary">
+                <strong>Current Discount: {collectivePreview.currentDiscount || 0}%</strong>
+                <span>
+                  {collectivePreview.nextMilestone?.membersNeeded > 0
+                    ? `${collectivePreview.nextMilestone.membersNeeded} more user${collectivePreview.nextMilestone.membersNeeded === 1 ? '' : 's'} needed to unlock ${collectivePreview.nextMilestone.nextDiscount}%`
+                    : 'Maximum discount unlocked'}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
