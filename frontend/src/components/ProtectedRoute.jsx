@@ -16,8 +16,13 @@ const ProtectedRoute = ({ children, requiredRole, redirectTo }) => {
   // 1. If not logged in, redirect to appropriate login page
   if (!role || !user) {
     const loginPath = requiredRole === 'seller' ? '/seller-login' : '/buyer-login';
+    const redirectPath = `${window.location.pathname}${window.location.search}`;
+    const loginTarget =
+      requiredRole === 'seller'
+        ? loginPath
+        : `${loginPath}?redirect=${encodeURIComponent(redirectPath)}`;
     console.log("NOT LOGGED IN. Navigating to:", loginPath);
-    return <Navigate to={loginPath} replace />;
+    return <Navigate to={loginTarget} replace />;
   }
 
   // 2. If logged in but has the WRONG role

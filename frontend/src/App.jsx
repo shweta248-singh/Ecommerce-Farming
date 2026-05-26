@@ -1,5 +1,5 @@
 import React from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import Navbar from './components/Navbar.jsx'
 import Footer from './components/Footer.jsx'
 import Home from './pages/Home.jsx'
@@ -37,11 +37,26 @@ const STANDALONE_ROUTES = ['/seller-dashboard'];
 
 function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isStandalone = STANDALONE_ROUTES.includes(location.pathname);
 
   React.useEffect(() => {
     console.log("ROUTE CHANGED TO:", location.pathname);
   }, [location.pathname]);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const openTarget = params.get('open');
+
+    const targetRoutes = {
+      notifications: '/notifications',
+      collectiveBuying: '/collective-buying',
+    };
+
+    if (location.pathname === '/' && targetRoutes[openTarget]) {
+      navigate(targetRoutes[openTarget], { replace: true });
+    }
+  }, [location.pathname, location.search, navigate]);
 
   return (
     <>

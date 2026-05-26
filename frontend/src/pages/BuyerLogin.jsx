@@ -86,7 +86,13 @@ export default function BuyerLogin() {
 
       console.log("LOGIN SUCCESS. Navigating to: /");
       window.dispatchEvent(new Event('authChange'));
-      navigate('/'); // Redirect to Buyer Home
+      const params = new URLSearchParams(window.location.search);
+      const redirectTo = params.get('redirect');
+      const safeRedirect =
+        redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//')
+          ? redirectTo
+          : '/';
+      navigate(safeRedirect);
     } catch (err) {
       setError(err.message || t('auth.error_generic'));
     } finally {

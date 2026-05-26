@@ -185,8 +185,10 @@ export const sendCollectiveInviteEmail = async ({
   const displayReceiver = receiverName || "AgroMitra user";
   const displaySender = senderName || "A buyer";
   const displayProduct = productName || "an AgroMitra product";
-  const appUrl =
-    `${String(frontendUrl || "").replace(/\/$/, "") || "https://ecommerce-farming-frontend.onrender.com"}/notifications`;
+  const appOrigin =
+    String(frontendUrl || "").replace(/\/$/, "") ||
+    "https://ecommerce-farming-frontend.onrender.com";
+  const appUrl = `${appOrigin}/?open=notifications`;
 
   return sendTransactionalEmail({
     to: email,
