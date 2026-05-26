@@ -174,6 +174,43 @@ export const sendRegistrationNotification = async ({ email, name, role }) => {
   });
 };
 
+export const sendCollectiveInviteEmail = async ({
+  email,
+  receiverName,
+  senderName,
+  productName,
+  productPrice,
+  frontendUrl,
+}) => {
+  const displayReceiver = receiverName || "AgroMitra user";
+  const displaySender = senderName || "A buyer";
+  const displayProduct = productName || "an AgroMitra product";
+  const appUrl =
+    `${String(frontendUrl || "").replace(/\/$/, "") || "https://ecommerce-farming-frontend.onrender.com"}/notifications`;
+
+  return sendTransactionalEmail({
+    to: email,
+    subject: "You have been invited for collective buying",
+    text: `${displaySender} invited you for collective buying on AgroMitra for ${displayProduct}. Login to accept or reject the invite: ${appUrl}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <h2 style="color: #15803d;">Collective Buying Invite</h2>
+        <p>Hi ${displayReceiver},</p>
+        <p><strong>${displaySender}</strong> invited you for collective buying on AgroMitra.</p>
+        <p><strong>Product:</strong> ${displayProduct}</p>
+        ${productPrice !== undefined && productPrice !== null ? `<p><strong>Price:</strong> Rs.${productPrice}</p>` : ""}
+        <p>Login to AgroMitra to accept or reject this invite.</p>
+        <p>
+          <a href="${appUrl}" style="display:inline-block;background:#15803d;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:6px;font-weight:700;">
+            View Notification
+          </a>
+        </p>
+        <p style="color:#64748b;font-size:13px;">Discount and equal split amount will be calculated securely by AgroMitra after members join.</p>
+      </div>
+    `,
+  });
+};
+
 export const sendEmail = async (email, otp) => {
   try {
     const emailContent = buildOtpEmail(otp);

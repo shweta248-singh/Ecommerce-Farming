@@ -7,6 +7,7 @@ import User from "../models/User.js";
 import mongoose from "mongoose";
 import { getNextDiscountMilestone } from "../services/discountService.js";
 import { calculateSplitPayment } from "../services/splitPaymentService.js";
+import { sendCollectiveInviteEmail } from "../utils/sendEmail.js";
 
 const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -230,6 +231,17 @@ export const sendCollectiveInvite = async (req, res) => {
       message: "You have been invited for collective buying",
       relatedInviteId: invite._id,
       relatedSessionId: session._id,
+    });
+
+    sendCollectiveInviteEmail({
+      email: receiver.email,
+      receiverName: receiver.name || receiver.full_name || receiver.email,
+      senderName,
+      productName: product.name || product.title,
+      productPrice: product.price,
+      frontendUrl: process.env.FRONTEND_URL || process.env.CLIENT_URL || process.env.CORS_ORIGIN,
+    }).catch((emailError) => {
+      console.error("Collective invite email failed:", emailError.message);
     });
 
     await invite.populate(["senderId", "receiverId", "productId", "sessionId"]);
