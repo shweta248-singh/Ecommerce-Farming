@@ -54,7 +54,9 @@ function App() {
     };
 
     if (location.pathname === '/' && targetRoutes[openTarget]) {
-      navigate(targetRoutes[openTarget], { replace: true });
+      params.delete('open');
+      const rest = params.toString();
+      navigate(`${targetRoutes[openTarget]}${rest ? `?${rest}` : ''}`, { replace: true });
     }
   }, [location.pathname, location.search, navigate]);
 

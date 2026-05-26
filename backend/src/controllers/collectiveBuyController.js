@@ -85,6 +85,16 @@ const addMemberIfMissing = (session, userId) => {
   }
 };
 
+const shapeInvite = (doc) => {
+  const obj = doc.toObject ? doc.toObject() : { ...doc };
+  obj.id = obj._id?.toString?.() || obj.id;
+  obj.sender = obj.senderId && typeof obj.senderId === "object" ? obj.senderId : null;
+  obj.receiver = obj.receiverId && typeof obj.receiverId === "object" ? obj.receiverId : null;
+  obj.product = obj.productId && typeof obj.productId === "object" ? obj.productId : null;
+  obj.session_id = obj.sessionId?._id?.toString?.() || obj.sessionId?.toString?.() || obj.sessionId;
+  return obj;
+};
+
 export const getCollectiveProductPreview = async (req, res) => {
   try {
     if (!isValidObjectId(req.params.productId)) {
@@ -240,6 +250,7 @@ export const sendCollectiveInvite = async (req, res) => {
       productName: product.name || product.title,
       productPrice: product.price,
       frontendUrl: process.env.FRONTEND_URL || process.env.CLIENT_URL || process.env.CORS_ORIGIN,
+      inviteId: invite._id,
     }).catch((emailError) => {
       console.error("Collective invite email failed:", emailError.message);
     });
@@ -257,6 +268,51 @@ export const sendCollectiveInvite = async (req, res) => {
       return res.status(400).json({ message: "A pending invite already exists" });
     }
     return res.status(500).json({ message: error.message });
+  }
+};
+
+export const getCollectiveInvite = async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.inviteId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
+    const invite = await CollectiveInvite.findById(req.params.inviteId)
+      .populate("senderId", "name full_name email avatar")
+      .populate("receiverId", "name full_name email avatar")
+      .populate("productId", "name title image image_url price unit")
+      .populate("sessionId");
+
+    if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+    const isReceiver = invite.receiverId?._id?.toString() === req.user.id;
+    const isSender = invite.senderId?._id?.toString() === req.user.id;
+
+    if (!isReceiver && !isSender) {
+      return res.status(403).json({
+        message: `This invite belongs to ${invite.receiverId?.email || "another user"}. Please login with the invited account.`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      invite: shapeInvite(invite),
+      notification: isReceiver
+        ? {
+            id: `invite-${invite._id}`,
+            type: "collective_invite",
+            message: "You have been invited for collective buying",
+            invite: shapeInvite(invite),
+            sender: invite.senderId,
+            relatedInviteId: invite._id,
+            relatedSessionId: invite.sessionId?._id || invite.sessionId,
+            isRead: false,
+            created_at: invite.created_at,
+          }
+        : null,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" });
   }
 };
 

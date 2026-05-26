@@ -22,5 +22,8 @@ export const rejectCollectiveInvite = (inviteId) =>
     method: "POST",
   });
 
+export const getCollectiveInvite = (inviteId) =>
+  apiRequest(`/collective-buy/invite/${inviteId}`);
+
 export const getCollectiveSession = (sessionId) =>
   apiRequest(`/collective-buy/session/${sessionId}`);

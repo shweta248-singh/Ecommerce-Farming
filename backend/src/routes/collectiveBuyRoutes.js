@@ -3,6 +3,7 @@ import {
   acceptCollectiveInvite,
   getActiveCollectiveSessionsForProduct,
   getCollectiveProductPreview,
+  getCollectiveInvite,
   getCollectiveSession,
   joinCollectiveBuy,
   listCollectiveBuys,
@@ -20,6 +21,7 @@ router.get("/", listCollectiveBuys);
 router.get("/seller/mine", protect, authorizeRoles("seller"), listMySellerCollectiveBuys);
 router.get("/preview/:productId", protect, authorizeRoles("buyer"), getCollectiveProductPreview);
 router.get("/product/:productId/active", getActiveCollectiveSessionsForProduct);
+router.get("/invite/:inviteId", protect, authorizeRoles("buyer"), getCollectiveInvite);
 router.get("/session/:id", protect, authorizeRoles("buyer"), getCollectiveSession);
 router.post("/send-invite", protect, authorizeRoles("buyer"), sendCollectiveInvite);
 router.post("/accept/:inviteId", protect, authorizeRoles("buyer"), acceptCollectiveInvite);

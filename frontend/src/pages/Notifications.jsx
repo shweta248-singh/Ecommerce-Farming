@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   acceptCollectiveInvite,
+  getCollectiveInvite,
   rejectCollectiveInvite,
 } from "../services/collectiveBuyService";
 import {
@@ -13,17 +14,33 @@ import "../components/landing.css";
 
 export default function Notifications() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   async function loadNotifications() {
     setLoading(true);
+    setMessage("");
     try {
+      const params = new URLSearchParams(location.search);
+      const inviteId = params.get("invite");
       const payload = await fetchNotifications();
-      setNotifications(payload.notifications || []);
+      let nextNotifications = payload.notifications || [];
+
+      if (inviteId && !nextNotifications.some((item) => {
+        const relatedInviteId = item.relatedInviteId?._id || item.relatedInviteId || item.invite?._id;
+        return relatedInviteId?.toString?.() === inviteId || relatedInviteId === inviteId;
+      })) {
+        const invitePayload = await getCollectiveInvite(inviteId);
+        if (invitePayload.notification) {
+          nextNotifications = [invitePayload.notification, ...nextNotifications];
+        }
+      }
+
+      setNotifications(nextNotifications);
     } catch (error) {
-      setMessage(error.message || "Could not load notifications.");
+      setMessage(error.message || "Could not load notifications. Please login with the invited buyer account.");
     } finally {
       setLoading(false);
     }
@@ -35,7 +52,7 @@ export default function Notifications() {
     }, 0);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [location.search]);
 
   async function handleAccept(notification) {
     const inviteId = notification.relatedInviteId?._id || notification.relatedInviteId || notification.invite?._id;
@@ -43,7 +60,9 @@ export default function Notifications() {
 
     try {
       const payload = await acceptCollectiveInvite(inviteId);
-      await markNotificationRead(notification.id);
+      if (!String(notification.id || "").startsWith("invite-")) {
+        await markNotificationRead(notification.id);
+      }
       window.dispatchEvent(new Event("notificationsUpdated"));
       navigate(`/collective/session/${payload.session.id}`);
     } catch (error) {
@@ -57,7 +76,9 @@ export default function Notifications() {
 
     try {
       await rejectCollectiveInvite(inviteId);
-      await markNotificationRead(notification.id);
+      if (!String(notification.id || "").startsWith("invite-")) {
+        await markNotificationRead(notification.id);
+      }
       window.dispatchEvent(new Event("notificationsUpdated"));
       await loadNotifications();
     } catch (error) {
@@ -91,7 +112,7 @@ export default function Notifications() {
         {notifications.length === 0 ? (
           <div className="orders-empty">
             <h2>No notifications</h2>
-            <p>Invite updates will appear here.</p>
+            <p>Invite updates will appear here. If you opened an email invite, login with the invited email account.</p>
             <Link to="/products" className="orders-shop-btn">Explore Products</Link>
           </div>
         ) : (

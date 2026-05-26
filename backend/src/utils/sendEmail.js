@@ -181,6 +181,7 @@ export const sendCollectiveInviteEmail = async ({
   productName,
   productPrice,
   frontendUrl,
+  inviteId,
 }) => {
   const displayReceiver = receiverName || "AgroMitra user";
   const displaySender = senderName || "A buyer";
@@ -188,7 +189,8 @@ export const sendCollectiveInviteEmail = async ({
   const appOrigin =
     String(frontendUrl || "").replace(/\/$/, "") ||
     "https://ecommerce-farming-frontend.onrender.com";
-  const appUrl = `${appOrigin}/?open=notifications`;
+  const inviteQuery = inviteId ? `&invite=${encodeURIComponent(inviteId.toString())}` : "";
+  const appUrl = `${appOrigin}/?open=notifications${inviteQuery}`;
 
   return sendTransactionalEmail({
     to: email,
