@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../lib/mongoClient';
 import { useLanguage } from '../context/LanguageContext';
 import CollectiveBuyModal from '../components/CollectiveBuyModal';
@@ -31,6 +31,7 @@ const getProductFallbackImage = (name = 'Product') => {
 
 export default function ProductDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { t } = useLanguage();
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -193,7 +194,15 @@ export default function ProductDetail() {
             </button>
             <button
               type="button"
-              onClick={() => setShowCollectiveModal(true)}
+              onClick={async () => {
+                const { data: userData } = await db.auth.currentUser();
+                if (!userData?.user) {
+                  alert(t('product.login_buyer'));
+                  navigate('/buyer-login');
+                  return;
+                }
+                setShowCollectiveModal(true);
+              }}
               style={{
                 marginTop: '12px',
                 background: '#f59e0b',

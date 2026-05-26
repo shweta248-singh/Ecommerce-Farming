@@ -18,7 +18,8 @@ export default function CollectiveBuyModal({ product, onClose }) {
 
     async function loadPreview() {
       try {
-        const payload = await getCollectivePreview(product.id);
+        const productId = product.id || product._id;
+        const payload = await getCollectivePreview(productId);
         if (isMounted) setPreview(payload);
       } catch (error) {
         if (isMounted) setMessage(error.message || "Could not load collective buy details.");
@@ -31,7 +32,7 @@ export default function CollectiveBuyModal({ product, onClose }) {
     return () => {
       isMounted = false;
     };
-  }, [product.id]);
+  }, [product.id, product._id]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -39,8 +40,19 @@ export default function CollectiveBuyModal({ product, onClose }) {
     setMessage("");
 
     try {
+      if (!localStorage.getItem("token")) {
+        setMessage("Please login before sending a collective buying invite.");
+        navigate("/buyer-login");
+        return;
+      }
+
+      if (!form.username.trim() && !form.email.trim() && !form.userId.trim()) {
+        setMessage("Enter a username, email, or user ID to invite.");
+        return;
+      }
+
       const payload = await sendCollectiveInvite({
-        productId: product.id,
+        productId: product.id || product._id,
         username: form.username.trim() || undefined,
         email: form.email.trim() || undefined,
         userId: form.userId.trim() || undefined,

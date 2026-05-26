@@ -59,9 +59,9 @@ export default function CollectiveSession() {
             <div className="cb-metrics cb-session-metrics">
               <div><span>Total Members</span><strong>{session.totalMembers}</strong></div>
               <div><span>Current Discount</span><strong>{session.currentDiscount}%</strong></div>
-              <div><span>Original Price</span><strong>₹{session.totalOriginalPrice}</strong></div>
-              <div><span>Discounted Price</span><strong>₹{session.totalDiscountedPrice}</strong></div>
-              <div><span>Each User Pays</span><strong>₹{session.perUserAmount}</strong></div>
+              <div><span>Original Price</span><strong>Rs.{session.originalPrice}</strong></div>
+              <div><span>Discounted Price</span><strong>Rs.{session.discountedPrice}</strong></div>
+              <div><span>Each User Pays</span><strong>Rs.{session.perUserAmount}</strong></div>
             </div>
 
             <div className="cb-progress">

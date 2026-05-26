@@ -1,97 +1,84 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { apiRequest, db } from '../lib/mongoClient'
-import { useLanguage } from '../context/LanguageContext'
+import { Link, useNavigate } from 'react-router-dom'
+import CollectiveBuyModal from '../components/CollectiveBuyModal'
+import ProductCard from '../components/ProductCard'
+import { db } from '../lib/mongoClient'
+import { getActiveCollectiveSessionsForProduct } from '../services/collectiveBuyService'
 import '../components/landing.css'
 
-const getImage = (group) =>
-  group?.product?.image ||
-  group?.product?.image_url ||
+const getImage = (product) =>
+  product?.image ||
+  product?.image_url ||
   'https://via.placeholder.com/600x400?text=AgroMitra'
 
 export default function CollectiveBuying() {
   const navigate = useNavigate()
-  const { t } = useLanguage()
-  const [groups, setGroups] = useState([])
   const [products, setProducts] = useState([])
+  const [sessions, setSessions] = useState([])
+  const [selectedProductId, setSelectedProductId] = useState('')
+  const [showInvite, setShowInvite] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [joining, setJoining] = useState(false)
+  const [sessionLoading, setSessionLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [form, setForm] = useState({
-    productId: '',
-    area: '',
-    quantity: 1,
-  })
 
   useEffect(() => {
-    loadData()
+    loadProducts()
   }, [])
 
-  async function loadData() {
+  useEffect(() => {
+    if (selectedProductId) loadActiveSessions(selectedProductId)
+  }, [selectedProductId])
+
+  async function loadProducts() {
     setLoading(true)
     setMessage('')
 
     try {
-      const [groupPayload, productResult] = await Promise.all([
-        apiRequest('/collective-buys'),
-        db.from('products').select('*').order('created_at', { ascending: false }),
-      ])
+      const { data, error } = await db
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-      setGroups(groupPayload.collectiveBuys || [])
-      setProducts(productResult.data || [])
-      setForm((prev) => ({
-        ...prev,
-        productId: prev.productId || productResult.data?.[0]?.id || '',
-      }))
+      if (error) throw error
+
+      const nextProducts = data || []
+      setProducts(nextProducts)
+      setSelectedProductId(nextProducts[0]?.id || '')
     } catch (error) {
-      setMessage(error.message || t('collective.loadFailed'))
+      setMessage(error.message || 'Could not load collective buying products.')
     } finally {
       setLoading(false)
     }
   }
 
-  const selectedProduct = useMemo(
-    () => products.find((product) => product.id === form.productId),
-    [products, form.productId]
-  )
+  async function loadActiveSessions(productId) {
+    setSessionLoading(true)
 
-  async function handleJoin(e) {
-    e.preventDefault()
+    try {
+      const payload = await getActiveCollectiveSessionsForProduct(productId)
+      setSessions(payload.sessions || [])
+    } catch {
+      setSessions([])
+    } finally {
+      setSessionLoading(false)
+    }
+  }
 
+  async function handleInviteClick() {
     const { data: userData } = await db.auth.currentUser()
     if (!userData?.user) {
-      alert(t('product.login_buyer'))
+      alert('Please login as buyer first.')
       navigate('/buyer-login')
       return
     }
 
-    if (!form.productId || !form.area.trim() || Number(form.quantity) <= 0) {
-      setMessage(t('collective.validation'))
-      return
-    }
-
-    setJoining(true)
-    setMessage('')
-
-    try {
-      await apiRequest('/collective-buys/join', {
-        method: 'POST',
-        body: JSON.stringify({
-          productId: form.productId,
-          area: form.area,
-          quantity: Number(form.quantity),
-        }),
-      })
-
-      setMessage(t('collective.joined'))
-      setForm((prev) => ({ ...prev, quantity: 1 }))
-      await loadData()
-    } catch (error) {
-      setMessage(error.message || t('collective.joinFailed'))
-    } finally {
-      setJoining(false)
-    }
+    setShowInvite(true)
   }
+
+  const selectedProduct = useMemo(
+    () => products.find((product) => product.id === selectedProductId),
+    [products, selectedProductId]
+  )
 
   if (loading) {
     return (
@@ -99,7 +86,7 @@ export default function CollectiveBuying() {
         <div className="products-container-pro">
           <div className="products-loading">
             <div className="loader-spinner"></div>
-            <p>{t('collective.loading')}</p>
+            <p>Loading collective buying...</p>
           </div>
         </div>
       </section>
@@ -111,10 +98,10 @@ export default function CollectiveBuying() {
       <div className="products-container-pro">
         <div className="products-hero-mini">
           <div>
-            <span>{t('collective.badge')}</span>
-            <h1>{t('collective.title')}</h1>
+            <span>Invite-based collective buying</span>
+            <h1>Buy Together & Save Up To 25%</h1>
             <p>
-              {t('collective.subtitle')}
+              Choose a product, invite another AgroMitra user by username, email, or user ID, and let the backend unlock discounts as members join.
             </p>
           </div>
         </div>
@@ -127,124 +114,117 @@ export default function CollectiveBuying() {
 
         <div className="category-product-section">
           <div className="category-section-head">
-            <h2>{t('collective.joinTitle')}</h2>
-            <span>{selectedProduct ? t('collective.selected', { name: selectedProduct.name }) : t('collective.chooseProduct')}</span>
+            <h2>Start an Invite</h2>
+            <span>{selectedProduct ? selectedProduct.name : 'Select a product'}</span>
           </div>
 
-          <form
-            onSubmit={handleJoin}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 12,
-              alignItems: 'end',
-              background: 'white',
-              padding: 20,
-              borderRadius: 8,
-              border: '1px solid #e5e7eb',
-            }}
-          >
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              {t('collective.product')}
-              <select
-                value={form.productId}
-                onChange={(e) => setForm((prev) => ({ ...prev, productId: e.target.value }))}
-                style={{ padding: 12, border: '1px solid #d1d5db', borderRadius: 6 }}
-              >
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} - Rs.{product.price}/{product.unit || t('common.units.piece')}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {products.length === 0 ? (
+            <div className="products-empty-pro">
+              <h2>No products available</h2>
+              <p>Collective buying starts from a product listing.</p>
+              <Link to="/products" className="orders-shop-btn">Browse Products</Link>
+            </div>
+          ) : (
+            <div className="cb-product-picker">
+              <label>
+                Product
+                <select
+                  value={selectedProductId}
+                  onChange={(event) => setSelectedProductId(event.target.value)}
+                >
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name} - Rs.{product.price}/{product.unit || 'piece'}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              {t('collective.area')}
-              <input
-                value={form.area}
-                onChange={(e) => setForm((prev) => ({ ...prev, area: e.target.value }))}
-                placeholder={t('collective.areaPlaceholder')}
-                style={{ padding: 12, border: '1px solid #d1d5db', borderRadius: 6 }}
-              />
-            </label>
+              {selectedProduct && (
+                <div className="cb-selected-product">
+                  <img src={getImage(selectedProduct)} alt={selectedProduct.name} />
+                  <div>
+                    <strong>{selectedProduct.name}</strong>
+                    <span>Rs.{selectedProduct.price} / {selectedProduct.unit || 'piece'}</span>
+                    <p>Discount and equal split are calculated only by the backend.</p>
+                  </div>
+                </div>
+              )}
 
-            <label style={{ display: 'grid', gap: 6, fontWeight: 700 }}>
-              {t('collective.quantity')}
-              <input
-                type="number"
-                min="1"
-                value={form.quantity}
-                onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
-                style={{ padding: 12, border: '1px solid #d1d5db', borderRadius: 6 }}
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={joining || products.length === 0}
-              style={{
-                background: '#15803d',
-                color: 'white',
-                border: 0,
-                borderRadius: 6,
-                padding: '13px 18px',
-                fontWeight: 800,
-                cursor: joining ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {joining ? t('collective.joining') : t('collective.join')}
-            </button>
-          </form>
+              <button type="button" onClick={handleInviteClick}>
+                Collective Buy
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="category-product-section mt-12">
           <div className="category-section-head">
-            <h2>{t('collective.activeTitle')}</h2>
-            <span>{t('collective.groups', { count: groups.length })}</span>
+            <h2>Active Sessions</h2>
+            <span>{sessionLoading ? 'Refreshing...' : `${sessions.length} for selected product`}</span>
           </div>
 
-          {groups.length === 0 ? (
+          {sessions.length === 0 ? (
             <div className="products-empty-pro">
-              <h2>{t('collective.emptyTitle')}</h2>
-              <p>{t('collective.emptyText')}</p>
+              <h2>No active invite sessions yet</h2>
+              <p>Send an invite to create the first collective buying session for this product.</p>
             </div>
           ) : (
-            <div className="shop-products-row">
-              {groups.map((group) => {
-                const progress = Math.min(
-                  100,
-                  Math.round((Number(group.totalQuantity || 0) / Number(group.targetQuantity || 1)) * 100)
-                )
+            <div className="orders-list">
+              {sessions.map((session) => {
+                const product = session.product || selectedProduct || {}
+                const next = session.nextMilestone || {}
 
                 return (
-                  <div key={group.id} className="shop-card" style={{ cursor: 'default' }}>
-                    <div className="shop-img-box">
-                      <img src={getImage(group)} alt={group.productName} />
-                    </div>
-                    <div className="shop-info">
-                      <span className="shop-tag">{group.area}</span>
-                      <h3>{group.productName}</h3>
-                      <div className="shop-price">
-                        <span>{t('collective.dealPrice', { price: group.dealPrice || group.product?.price || 0 })}</span>
+                  <div key={session.id} className="order-card">
+                    <div className="order-card-top">
+                      <div>
+                        <strong>{product.name || product.title}</strong>
+                        <p>Current Discount: {session.currentDiscount || 0}%</p>
+                        <small>
+                          Each User Pays: Rs.{session.perUserAmount || product.price || 0}
+                        </small>
                       </div>
-                      <p className="shop-pack">
-                        {t('collective.combined', { total: group.totalQuantity, target: group.targetQuantity })}
-                      </p>
-                      <div style={{ height: 8, background: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
-                        <div style={{ width: `${progress}%`, height: '100%', background: '#16a34a' }} />
-                      </div>
-                      <p className="shop-rating">
-                        {group.status === 'deal_ready' ? t('collective.dealReady') : t('collective.open')}
-                      </p>
+                      <span>{session.totalMembers || 1} members</span>
                     </div>
+                    <p>
+                      {next.membersNeeded > 0
+                        ? `Add ${next.membersNeeded} more user${next.membersNeeded === 1 ? '' : 's'} to unlock ${next.nextDiscount}% OFF`
+                        : 'Maximum discount unlocked'}
+                    </p>
+                    <Link className="orders-shop-btn" to={`/collective/session/${session.id}`}>
+                      View Session
+                    </Link>
                   </div>
                 )
               })}
             </div>
           )}
         </div>
+
+        <div className="category-product-section mt-12">
+          <div className="category-section-head">
+            <h2>Products Ready For Collective Buy</h2>
+            <span>{products.length} items</span>
+          </div>
+
+          <div className="shop-products-row">
+            {products.slice(0, 8).map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </div>
       </div>
+
+      {showInvite && selectedProduct && (
+        <CollectiveBuyModal
+          product={selectedProduct}
+          onClose={() => {
+            setShowInvite(false)
+            loadActiveSessions(selectedProduct.id)
+          }}
+        />
+      )}
     </section>
   )
 }

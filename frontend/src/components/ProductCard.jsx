@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { db } from '../lib/mongoClient'
 import { useLanguage } from '../context/LanguageContext'
+import CollectiveBuyModal from './CollectiveBuyModal'
 import './landing.css'
 
 const escapeSvgText = (value = '') =>
@@ -29,6 +30,7 @@ const getProductFallbackImage = (name = 'Product') => {
 
 export default function ProductCard({ product }) {
   const [adding, setAdding] = useState(false)
+  const [showCollectiveModal, setShowCollectiveModal] = useState(false)
   const navigate = useNavigate()
   const { t } = useLanguage()
 
@@ -44,25 +46,29 @@ export default function ProductCard({ product }) {
   const ratingAverage = Number(product?.rating_average || product?.rating || 0)
   const hasRating = ratingCount > 0 && ratingAverage > 0
 
+  async function requireBuyerLogin() {
+    const { data: userData, error: userError } = await db.auth.currentUser()
+    if (userError) throw userError
+
+    const user = userData?.user
+    if (!user) {
+      alert('Please login as buyer first.')
+      navigate('/buyer-login')
+      return null
+    }
+
+    return user
+  }
+
   async function handleAddToCart(e) {
     e.stopPropagation()
-
     if (adding) return
 
     setAdding(true)
 
     try {
-      const { data: userData, error: userError } = await db.auth.currentUser()
-
-      if (userError) throw userError
-
-      const user = userData?.user
-
-      if (!user) {
-        alert('Please login as buyer first.')
-        navigate('/buyer-login')
-        return
-      }
+      const user = await requireBuyerLogin()
+      if (!user) return
 
       const { data: existingItem, error: fetchError } = await db
         .from('cart')
@@ -83,9 +89,7 @@ export default function ProductCard({ product }) {
 
         const { error: updateError } = await db
           .from('cart')
-          .update({
-            quantity: nextQuantity,
-          })
+          .update({ quantity: nextQuantity })
           .eq('id', existingItem.id)
 
         if (updateError) throw updateError
@@ -108,7 +112,6 @@ export default function ProductCard({ product }) {
       }
 
       window.dispatchEvent(new Event('cartUpdated'))
-
       alert('Added to cart')
     } catch (error) {
       console.error('Add to cart error:', error)
@@ -118,47 +121,74 @@ export default function ProductCard({ product }) {
     }
   }
 
+  async function handleCollectiveBuy(e) {
+    e.stopPropagation()
+
+    try {
+      const user = await requireBuyerLogin()
+      if (user) setShowCollectiveModal(true)
+    } catch (error) {
+      alert(error.message || 'Please login to start a collective buy.')
+    }
+  }
+
   function handleProductClick() {
     navigate(`/product/${product.id}`)
   }
 
   return (
-    <div className="shop-card" onClick={handleProductClick} style={{ cursor: 'pointer' }}>
-      <div className="shop-img-box">
-        <img
-          src={image}
-          alt={product?.name || 'Product'}
-          onError={(event) => {
-            event.currentTarget.onerror = null
-            event.currentTarget.src = getProductFallbackImage(product?.name)
-          }}
-        />
+    <>
+      <div className="shop-card" onClick={handleProductClick} style={{ cursor: 'pointer' }}>
+        <div className="shop-img-box">
+          <img
+            src={image}
+            alt={product?.name || 'Product'}
+            onError={(event) => {
+              event.currentTarget.onerror = null
+              event.currentTarget.src = getProductFallbackImage(product?.name)
+            }}
+          />
 
-        <button type="button" onClick={handleAddToCart} disabled={adding || stock < 1}>
-          {adding ? 'Adding...' : t('productsPage.addToCart') || 'ADD'}
-        </button>
-      </div>
-
-      <div className="shop-info">
-        <div className="shop-price">
-          <span>
-            ₹{price} / {t(`common.units.${unit}`)}
-          </span>
+          <button type="button" onClick={handleAddToCart} disabled={adding || stock < 1}>
+            {adding ? 'Adding...' : t('productsPage.addToCart') || 'Add to Cart'}
+          </button>
         </div>
 
+        <div className="shop-info">
+          <div className="shop-price">
+            <span>
+              Rs.{price} / {t(`common.units.${unit}`)}
+            </span>
+          </div>
 
-        <h3>{product?.name}</h3>
+          <h3>{product?.name}</h3>
 
-        <p className="shop-pack">
-          1 {t('product.pack')} ({stock} {t('product.in_stock')})
-        </p>
+          <p className="shop-pack">
+            1 {t('product.pack')} ({stock} {t('product.in_stock')})
+          </p>
 
-        <span className="shop-tag">{product?.category || 'Agriculture'}</span>
+          <span className="shop-tag">{product?.category || 'Agriculture'}</span>
 
-        {hasRating && (
-          <p className="shop-rating">⭐ {ratingAverage.toFixed(1)} ({ratingCount})</p>
-        )}
+          {hasRating && (
+            <p className="shop-rating">Rating {ratingAverage.toFixed(1)} ({ratingCount})</p>
+          )}
+
+          <p className="cb-product-summary">
+            <strong>Buy Together & Save Up To 25%</strong>
+          </p>
+
+          <button type="button" className="cb-card-button" onClick={handleCollectiveBuy}>
+            Collective Buy
+          </button>
+        </div>
       </div>
-    </div>
+
+      {showCollectiveModal && (
+        <CollectiveBuyModal
+          product={product}
+          onClose={() => setShowCollectiveModal(false)}
+        />
+      )}
+    </>
   )
 }

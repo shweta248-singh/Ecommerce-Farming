@@ -4,6 +4,7 @@ import CollectiveSession from "../models/CollectiveSession.js";
 import Notification from "../models/Notification.js";
 import Product from "../models/Product.js";
 import User from "../models/User.js";
+import mongoose from "mongoose";
 import { getNextDiscountMilestone } from "../services/discountService.js";
 import { calculateSplitPayment } from "../services/splitPaymentService.js";
 
@@ -21,6 +22,8 @@ const shapeCollectiveBuy = (doc) => {
 const INVITE_EXPIRY_HOURS = 48;
 const SESSION_EXPIRY_DAYS = 7;
 
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
+
 const shapeSession = (doc) => {
   if (!doc) return null;
   const obj = doc.toObject ? doc.toObject() : { ...doc };
@@ -28,6 +31,8 @@ const shapeSession = (doc) => {
   obj.product_id = obj.productId?._id?.toString?.() || obj.productId?.toString?.() || obj.productId;
   obj.product = obj.productId && typeof obj.productId === "object" ? obj.productId : null;
   obj.created_by = obj.createdBy?.toString?.() || obj.createdBy;
+  obj.originalPrice = obj.originalPrice ?? obj.totalOriginalPrice ?? 0;
+  obj.discountedPrice = obj.discountedPrice ?? obj.totalDiscountedPrice ?? 0;
   obj.nextMilestone = getNextDiscountMilestone(obj.totalMembers || obj.members?.length || 1);
   return obj;
 };
@@ -45,8 +50,8 @@ const recalculateSession = async (session) => {
   session.totalMembers = totalMembers;
   session.currentDiscount = split.discountPercentage;
   session.discountTier = split.discountTier;
-  session.totalOriginalPrice = split.originalPrice;
-  session.totalDiscountedPrice = split.finalDiscountedPrice;
+  session.originalPrice = split.originalPrice;
+  session.discountedPrice = split.finalDiscountedPrice;
   session.perUserAmount = split.perUserAmount;
 
   await session.save();
@@ -81,6 +86,10 @@ const addMemberIfMissing = (session, userId) => {
 
 export const getCollectiveProductPreview = async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.productId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
     const product = await Product.findById(req.params.productId);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
@@ -114,14 +123,58 @@ export const getCollectiveProductPreview = async (req, res) => {
   }
 };
 
+export const getActiveCollectiveSessionsForProduct = async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.productId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    const sessions = await CollectiveSession.find({
+      productId: product._id,
+      status: "active",
+      expiresAt: { $gt: new Date() },
+    })
+      .populate("productId", "name title image image_url price unit")
+      .sort({ totalMembers: -1, updated_at: -1 })
+      .limit(10);
+
+    const shapedSessions = [];
+    for (const session of sessions) {
+      await recalculateSession(session);
+      shapedSessions.push(shapeSession(session));
+    }
+
+    return res.json({
+      success: true,
+      productId: product.id,
+      count: shapedSessions.length,
+      totalMembers: shapedSessions.reduce((sum, session) => sum + Number(session.totalMembers || 0), 0),
+      sessions: shapedSessions,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const sendCollectiveInvite = async (req, res) => {
   try {
     const { productId, product_id, receiverId, userId, email, username } = req.body;
     const normalizedProductId = productId || product_id;
     const normalizedReceiverId = receiverId || userId;
 
+    if (!normalizedProductId || !isValidObjectId(normalizedProductId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
     const product = await Product.findById(normalizedProductId);
     if (!product) return res.status(404).json({ message: "Product not found" });
+
+    if (normalizedReceiverId && !isValidObjectId(normalizedReceiverId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
 
     const receiverQuery = normalizedReceiverId
       ? { _id: normalizedReceiverId }
@@ -174,7 +227,7 @@ export const sendCollectiveInvite = async (req, res) => {
       userId: receiver._id,
       senderId: req.user.id,
       type: "collective_invite",
-      message: `${senderName} invited you for collective buying: ${product.name || product.title}`,
+      message: "You have been invited for collective buying",
       relatedInviteId: invite._id,
       relatedSessionId: session._id,
     });
@@ -197,6 +250,10 @@ export const sendCollectiveInvite = async (req, res) => {
 
 export const acceptCollectiveInvite = async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.inviteId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
     const invite = await CollectiveInvite.findById(req.params.inviteId)
       .populate("productId")
       .populate("senderId");
@@ -233,6 +290,11 @@ export const acceptCollectiveInvite = async (req, res) => {
     invite.sessionId = session._id;
     await invite.save();
 
+    await Notification.updateMany(
+      { relatedInviteId: invite._id, userId: req.user.id },
+      { isRead: true, relatedSessionId: session._id }
+    );
+
     await Notification.create({
       userId: invite.senderId._id,
       senderId: req.user.id,
@@ -254,6 +316,10 @@ export const acceptCollectiveInvite = async (req, res) => {
 
 export const rejectCollectiveInvite = async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.inviteId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
     const invite = await CollectiveInvite.findById(req.params.inviteId).populate("senderId");
 
     if (!invite) return res.status(404).json({ message: "Invite not found" });
@@ -266,6 +332,11 @@ export const rejectCollectiveInvite = async (req, res) => {
 
     invite.status = "rejected";
     await invite.save();
+
+    await Notification.updateMany(
+      { relatedInviteId: invite._id, userId: req.user.id },
+      { isRead: true }
+    );
 
     await Notification.create({
       userId: invite.senderId._id,
@@ -284,6 +355,10 @@ export const rejectCollectiveInvite = async (req, res) => {
 
 export const getCollectiveSession = async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
     const session = await CollectiveSession.findById(req.params.id)
       .populate("productId")
       .populate("members.userId", "name full_name email avatar");

@@ -1,6 +1,7 @@
 import express from "express";
 import {
   acceptCollectiveInvite,
+  getActiveCollectiveSessionsForProduct,
   getCollectiveProductPreview,
   getCollectiveSession,
   joinCollectiveBuy,
@@ -18,6 +19,7 @@ const router = express.Router();
 router.get("/", listCollectiveBuys);
 router.get("/seller/mine", protect, authorizeRoles("seller"), listMySellerCollectiveBuys);
 router.get("/preview/:productId", protect, authorizeRoles("buyer"), getCollectiveProductPreview);
+router.get("/product/:productId/active", getActiveCollectiveSessionsForProduct);
 router.get("/session/:id", protect, authorizeRoles("buyer"), getCollectiveSession);
 router.post("/send-invite", protect, authorizeRoles("buyer"), sendCollectiveInvite);
 router.post("/accept/:inviteId", protect, authorizeRoles("buyer"), acceptCollectiveInvite);
