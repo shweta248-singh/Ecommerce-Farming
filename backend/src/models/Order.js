@@ -48,8 +48,13 @@ const orderSchema = new mongoose.Schema(
       {
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         quantity: Number,
+        paymentStatus: String,
+        paymentMethod: String,
         paidAmount: Number,
+        payableAmount: Number,
         paidAt: Date,
+        confirmedAt: Date,
+        paymentReference: String,
         deliveryAddress: Object,
       },
     ],

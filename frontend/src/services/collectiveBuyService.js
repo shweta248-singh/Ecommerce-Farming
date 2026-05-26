@@ -40,7 +40,27 @@ export const payCollectiveCheckout = (sessionId, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const startCollectiveOnlinePayment = (sessionId) =>
+  apiRequest(`/collective-buy/checkout/${sessionId}/start-online-payment`, {
+    method: "POST",
+  });
+
+export const confirmCollectiveOnlinePayment = (sessionId, payload) =>
+  apiRequest(`/collective-buy/checkout/${sessionId}/confirm-online-payment`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const confirmCollectiveCod = (sessionId, payload) =>
+  apiRequest(`/collective-buy/checkout/${sessionId}/confirm-cod`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
 export const completeCollectiveCheckout = (sessionId) =>
   apiRequest(`/collective-buy/checkout/${sessionId}/complete`, {
     method: "POST",
   });
+
+export const getCollectiveOrder = (orderId) =>
+  apiRequest(`/collective-buy/order/${orderId}`);

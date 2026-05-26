@@ -8,10 +8,8 @@ import User from "../models/User.js";
 import mongoose from "mongoose";
 import { getNextDiscountMilestone } from "../services/discountService.js";
 import { calculateSplitPayment } from "../services/splitPaymentService.js";
-import {
-  sendCollectiveInviteEmail,
-  sendCollectiveOrderConfirmedEmail,
-} from "../utils/sendEmail.js";
+import { sendCollectiveInviteEmail } from "../utils/sendEmail.js";
+import { sendCollectiveOrderEmail } from "../services/orderEmailService.js";
 
 const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -31,6 +29,39 @@ const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value 
 
 const roundMoney = (value) => Number(Number(value || 0).toFixed(2));
 
+const CONFIRMED_MEMBER_STATUSES = ["paid", "cod_confirmed"];
+
+const isMemberConfirmed = (member) =>
+  CONFIRMED_MEMBER_STATUSES.includes(member?.paymentStatus);
+
+const areAllMembersConfirmed = (members = []) =>
+  members.length > 0 && members.every(isMemberConfirmed);
+
+const deriveSessionPaymentStatus = (members = []) => {
+  const confirmedMembers = members.filter(isMemberConfirmed);
+  const paidMembers = members.filter((member) => member.paymentStatus === "paid");
+  const codMembers = members.filter((member) => member.paymentStatus === "cod_confirmed");
+
+  if (confirmedMembers.length === 0) return "pending";
+  if (confirmedMembers.length < members.length) return "partially_confirmed";
+  if (paidMembers.length === members.length) return "paid";
+  if (codMembers.length === members.length) return "cod_pending";
+  if (paidMembers.length > 0 && codMembers.length > 0) return "partially_paid_cod_pending";
+  return "confirmed";
+};
+
+const deriveOrderPaymentStatus = (members = []) => {
+  const paidMembers = members.filter((member) => member.paymentStatus === "paid");
+  const codMembers = members.filter((member) => member.paymentStatus === "cod_confirmed");
+
+  if (paidMembers.length === members.length) return "paid";
+  if (codMembers.length === members.length) return "cod_pending";
+  return "partially_paid_cod_pending";
+};
+
+const generateMockPaymentReference = (sessionId, userId) =>
+  `MOCK-${String(sessionId).slice(-6).toUpperCase()}-${String(userId).slice(-6).toUpperCase()}-${Date.now()}`;
+
 const shapeSession = (doc) => {
   if (!doc) return null;
   const obj = doc.toObject ? doc.toObject() : { ...doc };
@@ -41,6 +72,7 @@ const shapeSession = (doc) => {
   obj.originalPrice = obj.originalPrice ?? obj.totalOriginalPrice ?? 0;
   obj.discountedPrice = obj.discountedPrice ?? obj.totalDiscountedPrice ?? 0;
   obj.nextMilestone = getNextDiscountMilestone(obj.totalMembers || obj.members?.length || 1);
+  obj.allMembersConfirmed = areAllMembersConfirmed(obj.members || []);
   obj.allMembersPaid = (obj.members || []).length > 0 && (obj.members || []).every((member) => member.paymentStatus === "paid");
   return obj;
 };
@@ -62,13 +94,10 @@ const recalculateSession = async (session) => {
   session.discountedPrice = split.finalDiscountedPrice;
   session.perUserAmount = split.perUserAmount;
 
-  const paidCount = session.members.filter((member) => member.paymentStatus === "paid").length;
-  session.paymentStatus =
-    paidCount === 0
-      ? "pending"
-      : paidCount === session.members.length
-        ? "paid"
-        : "partially_paid";
+  session.members.forEach((member) => {
+    member.payableAmount = roundMoney(split.perUserAmount);
+  });
+  session.paymentStatus = deriveSessionPaymentStatus(session.members);
 
   await session.save();
   return session;
@@ -138,6 +167,12 @@ const getSessionForMember = async (sessionId, userId) => {
 };
 
 const ensureSessionCheckoutable = (session) => {
+  if (session.status === "completed") {
+    const error = new Error("This collective session is not active");
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (session.status !== "active") {
     const error = new Error("This collective session is not active");
     error.statusCode = 400;
@@ -166,10 +201,24 @@ const shapeCheckout = (session, member) => {
     totalMembers: session.totalMembers,
     perUserAmount: roundMoney(session.perUserAmount),
     currentUserPaymentStatus: member.paymentStatus || "pending",
+    currentUserPaymentMethod: member.paymentMethod || null,
     paidAmount: roundMoney(member.paidAmount),
+    payableAmount: roundMoney(member.payableAmount || session.perUserAmount),
     paidAt: member.paidAt,
+    confirmedAt: member.confirmedAt,
+    paymentReference: member.paymentReference || null,
     deliveryAddress: member.deliveryAddress || null,
     paymentStatus: session.paymentStatus,
+    members: session.members.map((item) => ({
+      userId: item.userId?._id || item.userId,
+      name: item.userId?.name || item.userId?.full_name || item.userId?.email || "Member",
+      email: item.userId?.email,
+      paymentStatus: item.paymentStatus || "pending",
+      paymentMethod: item.paymentMethod || null,
+      paidAmount: roundMoney(item.paidAmount),
+      payableAmount: roundMoney(item.payableAmount || session.perUserAmount),
+    })),
+    allMembersConfirmed: areAllMembersConfirmed(session.members),
     allMembersPaid: session.members.every((item) => item.paymentStatus === "paid"),
     orderId: session.orderId,
   };
@@ -192,15 +241,16 @@ const createOrGetCollectiveOrder = async (session) => {
 
   if (existingOrder) {
     session.status = "completed";
-    session.paymentStatus = "paid";
+    session.paymentStatus = deriveSessionPaymentStatus(session.members);
     session.orderId = existingOrder._id;
     session.completedAt = session.completedAt || existingOrder.created_at || new Date();
+    session.confirmedAt = session.confirmedAt || session.completedAt;
     await session.save();
     return existingOrder;
   }
 
-  if (!session.members.length || !session.members.every((member) => member.paymentStatus === "paid")) {
-    const error = new Error("All members must pay before completing this collective order");
+  if (!areAllMembersConfirmed(session.members)) {
+    const error = new Error("All members must confirm payment before completing this collective order");
     error.statusCode = 400;
     throw error;
   }
@@ -263,9 +313,14 @@ const createOrGetCollectiveOrder = async (session) => {
     members: session.members.map((member) => ({
       userId: member.userId?._id || member.userId,
       quantity: member.quantity || 1,
-      paidAmount: roundMoney(member.paidAmount),
-      paidAt: member.paidAt,
-      deliveryAddress: member.deliveryAddress,
+        paymentStatus: member.paymentStatus,
+        paymentMethod: member.paymentMethod,
+        paidAmount: roundMoney(member.paidAmount),
+        payableAmount: roundMoney(member.payableAmount || session.perUserAmount),
+        paidAt: member.paidAt,
+        confirmedAt: member.confirmedAt,
+        paymentReference: member.paymentReference,
+        deliveryAddress: member.deliveryAddress,
     })),
     originalPrice: roundMoney(session.originalPrice),
     discountPercentage: session.currentDiscount,
@@ -273,8 +328,8 @@ const createOrGetCollectiveOrder = async (session) => {
     totalAmount: roundMoney(session.discountedPrice),
     total: roundMoney(session.discountedPrice),
     total_amount: roundMoney(session.discountedPrice),
-    paymentStatus: "paid",
-    payment_status: "paid",
+    paymentStatus: deriveOrderPaymentStatus(session.members),
+    payment_status: deriveOrderPaymentStatus(session.members),
     payment_method: "collective_split",
     status: "confirmed",
     });
@@ -283,9 +338,10 @@ const createOrGetCollectiveOrder = async (session) => {
       order = await Order.findOne({ orderType: "collective", sessionId: session._id });
       if (order) {
         session.status = "completed";
-        session.paymentStatus = "paid";
+        session.paymentStatus = deriveSessionPaymentStatus(session.members);
         session.orderId = order._id;
         session.completedAt = session.completedAt || new Date();
+        session.confirmedAt = session.confirmedAt || session.completedAt;
         await session.save();
         return order;
       }
@@ -301,9 +357,10 @@ const createOrGetCollectiveOrder = async (session) => {
   }
 
   session.status = "completed";
-  session.paymentStatus = "paid";
+  session.paymentStatus = deriveSessionPaymentStatus(session.members);
   session.orderId = order._id;
   session.completedAt = new Date();
+  session.confirmedAt = session.confirmedAt || new Date();
   await session.save();
 
   const productName = product.name || product.title;
@@ -354,12 +411,18 @@ const createOrGetCollectiveOrder = async (session) => {
   session.members.forEach((member) => {
     const user = member.userId;
     if (!user?.email) return;
-    sendCollectiveOrderConfirmedEmail({
+    sendCollectiveOrderEmail({
       email: user.email,
       name: user.name || user.full_name || user.email,
       productName,
-      paidAmount: roundMoney(member.paidAmount),
       orderId: order._id,
+      originalPrice: roundMoney(session.originalPrice),
+      discount: session.currentDiscount,
+      discountedPrice: roundMoney(session.discountedPrice),
+      perUserAmount: roundMoney(session.perUserAmount),
+      paymentStatus: member.paymentStatus,
+      paymentMethod: member.paymentMethod,
+      deliveryAddress: member.deliveryAddress,
       frontendUrl,
     }).catch((emailError) => {
       console.error("Collective order confirmation email failed:", emailError.message);
@@ -746,11 +809,13 @@ export const getMyCollectiveSessions = async (req, res) => {
 export const getCollectiveCheckout = async (req, res) => {
   try {
     const { session, member } = await getSessionForMember(req.params.sessionId, req.user.id);
-    ensureSessionCheckoutable(session);
-    await recalculateSession(session);
+    if (session.status !== "completed") {
+      ensureSessionCheckoutable(session);
+      await recalculateSession(session);
+    }
 
     const product = session.productId;
-    if (getStockValue(product) < 1) {
+    if (session.status !== "completed" && getStockValue(product) < 1) {
       return res.status(400).json({ message: `${product.name || product.title} is out of stock` });
     }
 
@@ -766,14 +831,51 @@ export const getCollectiveCheckout = async (req, res) => {
   }
 };
 
-export const payCollectiveCheckout = async (req, res) => {
+const validateDeliveryAddress = (deliveryAddress = {}) => {
+  const requiredAddress = ["fullName", "phone", "addressLine1", "city", "state", "pincode"];
+  const missingAddressField = requiredAddress.find((field) => !String(deliveryAddress[field] || "").trim());
+
+  if (missingAddressField) {
+    const error = new Error("Complete delivery address is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    fullName: String(deliveryAddress.fullName).trim(),
+    phone: String(deliveryAddress.phone).trim(),
+    addressLine1: String(deliveryAddress.addressLine1).trim(),
+    addressLine2: String(deliveryAddress.addressLine2 || "").trim(),
+    city: String(deliveryAddress.city).trim(),
+    state: String(deliveryAddress.state).trim(),
+    pincode: String(deliveryAddress.pincode).trim(),
+    country: String(deliveryAddress.country || "India").trim(),
+  };
+};
+
+const ensureMemberCanConfirmPayment = (member) => {
+  if (isMemberConfirmed(member)) {
+    const error = new Error("Payment intent is already confirmed for this collective checkout");
+    error.statusCode = 409;
+    throw error;
+  }
+};
+
+export const startCollectiveOnlinePayment = async (req, res) => {
   try {
     const { session, member } = await getSessionForMember(req.params.sessionId, req.user.id);
     ensureSessionCheckoutable(session);
     await recalculateSession(session);
 
-    if (member.paymentStatus === "paid") {
-      return res.status(400).json({ message: "You have already paid for this collective checkout" });
+    if (isMemberConfirmed(member)) {
+      return res.json({
+        success: true,
+        alreadyConfirmed: true,
+        paymentStatus: member.paymentStatus,
+        paymentReference: member.paymentReference,
+        amount: roundMoney(member.payableAmount || session.perUserAmount),
+        sessionId: session.id,
+      });
     }
 
     const product = session.productId;
@@ -781,39 +883,59 @@ export const payCollectiveCheckout = async (req, res) => {
       return res.status(400).json({ message: `${product.name || product.title} is out of stock` });
     }
 
-    const { deliveryAddress = {}, paymentMethod = "cod" } = req.body;
-    const requiredAddress = ["fullName", "phone", "addressLine1", "city", "state", "pincode"];
-    const missingAddressField = requiredAddress.find((field) => !String(deliveryAddress[field] || "").trim());
+    const paymentReference = generateMockPaymentReference(session._id, req.user.id);
+    const amount = roundMoney(session.perUserAmount);
 
-    if (missingAddressField) {
-      return res.status(400).json({ message: "Complete delivery address is required" });
+    return res.json({
+      success: true,
+      amount,
+      paymentReference,
+      mockQrData: `agromitra://collective-pay?sessionId=${session._id}&userId=${req.user.id}&amount=${amount}&ref=${paymentReference}`,
+      sessionId: session.id,
+      productName: product.name || product.title,
+    });
+  } catch (error) {
+    console.error("Start collective online payment failed:", error);
+    return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
+  }
+};
+
+export const confirmCollectiveOnlinePayment = async (req, res) => {
+  try {
+    const { session, member } = await getSessionForMember(req.params.sessionId, req.user.id);
+    ensureSessionCheckoutable(session);
+    await recalculateSession(session);
+
+    if (isMemberConfirmed(member)) {
+      return res.json({
+        success: true,
+        message: "Payment already confirmed",
+        checkout: shapeCheckout(session, member),
+        session: shapeSession(session),
+        order: session.orderId || null,
+        completed: Boolean(session.orderId),
+      });
     }
 
-    if (!["cod", "mock_online"].includes(paymentMethod)) {
-      return res.status(400).json({ message: "Invalid payment method" });
+    const product = session.productId;
+    if (getStockValue(product) < 1) {
+      return res.status(400).json({ message: `${product.name || product.title} is out of stock` });
     }
+
+    const deliveryAddress = validateDeliveryAddress(req.body.deliveryAddress || {});
+    const paymentReference =
+      String(req.body.paymentReference || "").trim() ||
+      generateMockPaymentReference(session._id, req.user.id);
 
     member.paymentStatus = "paid";
+    member.paymentMethod = "mock_online";
     member.paidAmount = roundMoney(session.perUserAmount);
+    member.payableAmount = roundMoney(session.perUserAmount);
     member.paidAt = new Date();
-    member.deliveryAddress = {
-      fullName: String(deliveryAddress.fullName).trim(),
-      phone: String(deliveryAddress.phone).trim(),
-      addressLine1: String(deliveryAddress.addressLine1).trim(),
-      addressLine2: String(deliveryAddress.addressLine2 || "").trim(),
-      city: String(deliveryAddress.city).trim(),
-      state: String(deliveryAddress.state).trim(),
-      pincode: String(deliveryAddress.pincode).trim(),
-      country: String(deliveryAddress.country || "India").trim(),
-    };
-
-    const paidCount = session.members.filter((item) => item.paymentStatus === "paid").length;
-    session.paymentStatus =
-      paidCount === session.members.length
-        ? "paid"
-        : paidCount > 0
-          ? "partially_paid"
-          : "pending";
+    member.confirmedAt = member.paidAt;
+    member.paymentReference = paymentReference;
+    member.deliveryAddress = deliveryAddress;
+    session.paymentStatus = deriveSessionPaymentStatus(session.members);
 
     await session.save();
 
@@ -826,7 +948,7 @@ export const payCollectiveCheckout = async (req, res) => {
     });
 
     let order = null;
-    if (session.members.every((item) => item.paymentStatus === "paid")) {
+    if (areAllMembersConfirmed(session.members)) {
       order = await createOrGetCollectiveOrder(session);
     }
 
@@ -838,19 +960,95 @@ export const payCollectiveCheckout = async (req, res) => {
 
     return res.json({
       success: true,
-      message: order ? "Collective order completed" : "Payment recorded successfully",
+      message: order ? "Collective order completed" : "Online payment confirmed successfully",
       checkout: shapeCheckout(session, member),
       session: shapeSession(session),
       order,
       completed: Boolean(order),
     });
   } catch (error) {
-    console.error("Collective checkout payment failed:", error);
+    console.error("Confirm collective online payment failed:", error);
     if (error.message === "This collective session has expired" && error.statusCode === 400) {
       await CollectiveSession.findByIdAndUpdate(req.params.sessionId, { status: "expired" }).catch(() => {});
     }
     return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
   }
+};
+
+export const confirmCollectiveCod = async (req, res) => {
+  try {
+    const { session, member } = await getSessionForMember(req.params.sessionId, req.user.id);
+    ensureSessionCheckoutable(session);
+    await recalculateSession(session);
+
+    if (isMemberConfirmed(member)) {
+      return res.json({
+        success: true,
+        message: "Payment intent already confirmed",
+        checkout: shapeCheckout(session, member),
+        session: shapeSession(session),
+        order: session.orderId || null,
+        completed: Boolean(session.orderId),
+      });
+    }
+
+    const product = session.productId;
+    if (getStockValue(product) < 1) {
+      return res.status(400).json({ message: `${product.name || product.title} is out of stock` });
+    }
+
+    member.paymentStatus = "cod_confirmed";
+    member.paymentMethod = "cash_on_delivery";
+    member.paidAmount = 0;
+    member.payableAmount = roundMoney(session.perUserAmount);
+    member.confirmedAt = new Date();
+    member.deliveryAddress = validateDeliveryAddress(req.body.deliveryAddress || {});
+    session.paymentStatus = deriveSessionPaymentStatus(session.members);
+
+    await session.save();
+
+    await Notification.create({
+      userId: req.user.id,
+      type: "collective_cod_confirmed",
+      message: "Your collective-buy COD order has been confirmed.",
+      relatedSessionId: session._id,
+      isRead: false,
+    });
+
+    let order = null;
+    if (areAllMembersConfirmed(session.members)) {
+      order = await createOrGetCollectiveOrder(session);
+    }
+
+    await session.populate([
+      { path: "productId" },
+      { path: "members.userId", select: "name full_name email avatar" },
+      { path: "orderId" },
+    ]);
+
+    return res.json({
+      success: true,
+      message: order
+        ? "Collective order completed"
+        : "COD confirmed. Your share will be collected on delivery.",
+      checkout: shapeCheckout(session, member),
+      session: shapeSession(session),
+      order,
+      completed: Boolean(order),
+    });
+  } catch (error) {
+    console.error("Confirm collective COD failed:", error);
+    if (error.message === "This collective session has expired" && error.statusCode === 400) {
+      await CollectiveSession.findByIdAndUpdate(req.params.sessionId, { status: "expired" }).catch(() => {});
+    }
+    return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
+  }
+};
+
+export const payCollectiveCheckout = async (req, res) => {
+  return res.status(400).json({
+    message: "Use confirm-online-payment or confirm-cod for collective checkout payments",
+  });
 };
 
 export const completeCollectiveCheckout = async (req, res) => {
@@ -872,8 +1070,8 @@ export const completeCollectiveCheckout = async (req, res) => {
       return res.status(403).json({ message: "Not allowed to complete this session" });
     }
 
-    if (!session.members.every((member) => member.paymentStatus === "paid")) {
-      return res.status(400).json({ message: "All members must pay before completing this collective order" });
+    if (!areAllMembersConfirmed(session.members)) {
+      return res.status(400).json({ message: "All members must confirm payment before completing this collective order" });
     }
 
     const order = await createOrGetCollectiveOrder(session);
@@ -887,6 +1085,41 @@ export const completeCollectiveCheckout = async (req, res) => {
   } catch (error) {
     console.error("Complete collective checkout failed:", error);
     return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
+  }
+};
+
+export const getCollectiveOrder = async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.orderId)) {
+      return res.status(400).json({ message: "Invalid input" });
+    }
+
+    const order = await Order.findOne({
+      _id: req.params.orderId,
+      orderType: "collective",
+    })
+      .populate("productId", "name title image image_url price unit")
+      .populate("sessionId")
+      .populate("members.userId", "name full_name email avatar");
+
+    if (!order) return res.status(404).json({ message: "Collective order not found" });
+
+    const isMember = order.members.some(
+      (member) => (member.userId?._id || member.userId).toString() === req.user.id
+    );
+    const isAdmin = req.user.role === "admin" || req.user.roles?.includes("admin");
+
+    if (!isMember && !isAdmin) {
+      return res.status(403).json({ message: "Not allowed to view this collective order" });
+    }
+
+    return res.json({
+      success: true,
+      order,
+    });
+  } catch (error) {
+    console.error("Get collective order failed:", error);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 

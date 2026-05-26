@@ -78,11 +78,16 @@ export default function CollectiveSession() {
             <div className="cb-member-row">
               {members.map((member) => {
                 const name = member.userId?.name || member.userId?.full_name || member.userId?.email || "U";
+                const isConfirmed = member.paymentStatus === "paid" || member.paymentStatus === "cod_confirmed";
                 return (
                   <div className="cb-member-pill" key={member.userId?.id || member.userId?._id || name} title={name}>
                     <span>{name.slice(0, 2).toUpperCase()}</span>
-                    <small className={member.paymentStatus === "paid" ? "paid" : ""}>
-                      {member.paymentStatus === "paid" ? "Paid" : "Pending"}
+                    <small className={isConfirmed ? "paid" : ""}>
+                      {member.paymentStatus === "paid"
+                        ? "Paid"
+                        : member.paymentStatus === "cod_confirmed"
+                          ? "COD Confirmed"
+                          : "Pending"}
                     </small>
                   </div>
                 );

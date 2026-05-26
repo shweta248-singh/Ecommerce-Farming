@@ -18,6 +18,7 @@ import CategoryProducts from './pages/CategoryProducts.jsx'
 import CollectiveBuying from './pages/CollectiveBuying.jsx'
 import CollectiveSession from './pages/CollectiveSession.jsx'
 import CollectiveCheckout from './pages/CollectiveCheckout.jsx'
+import CollectiveOrderConfirmation from './pages/CollectiveOrderConfirmation.jsx'
 import Notifications from './pages/Notifications.jsx'
 import Payment from './pages/Payment.jsx'
 import Addresses from './pages/Addresses.jsx'
@@ -91,6 +92,11 @@ function App() {
           <Route path="/collective/checkout/:id" element={
             <ProtectedRoute requiredRole="buyer" redirectTo="/seller-dashboard">
               <CollectiveCheckout />
+            </ProtectedRoute>
+          } />
+          <Route path="/collective/order/:orderId" element={
+            <ProtectedRoute requiredRole="buyer" redirectTo="/seller-dashboard">
+              <CollectiveOrderConfirmation />
             </ProtectedRoute>
           } />
 

@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import MockPaymentGatewayModal from "../components/MockPaymentGatewayModal";
 import {
+  confirmCollectiveCod,
+  confirmCollectiveOnlinePayment,
   getCollectiveCheckout,
-  payCollectiveCheckout,
+  startCollectiveOnlinePayment,
 } from "../services/collectiveBuyService";
 import "../components/landing.css";
 
@@ -19,14 +22,21 @@ const emptyAddress = {
 
 const formatMoney = (value) => `Rs.${Number(value || 0).toFixed(2)}`;
 
+const statusLabel = (status) => {
+  if (status === "paid") return "Paid";
+  if (status === "cod_confirmed") return "COD Confirmed";
+  return "Pending";
+};
+
 export default function CollectiveCheckout() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [checkout, setCheckout] = useState(null);
   const [address, setAddress] = useState(emptyAddress);
-  const [paymentMethod, setPaymentMethod] = useState("cod");
+  const [paymentMethod, setPaymentMethod] = useState("mock_online");
+  const [mockPayment, setMockPayment] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [paying, setPaying] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -56,28 +66,95 @@ export default function CollectiveCheckout() {
     setAddress((prev) => ({ ...prev, [field]: value }));
   }
 
-  async function handlePayment(event) {
+  function validateAddress() {
+    const required = ["fullName", "phone", "addressLine1", "city", "state", "pincode"];
+    const missing = required.find((field) => !String(address[field] || "").trim());
+    if (missing) {
+      setMessage("Complete delivery address is required.");
+      return false;
+    }
+    return true;
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault();
-    setPaying(true);
+    setMessage("");
+
+    if (!validateAddress()) return;
+
+    if (paymentMethod === "cash_on_delivery") {
+      const ok = window.confirm(`Are you sure you want to confirm Cash on Delivery for ${formatMoney(checkout.perUserAmount)}?`);
+      if (!ok) return;
+      await confirmCod();
+      return;
+    }
+
+    await openMockGateway();
+  }
+
+  async function openMockGateway() {
+    setProcessing(true);
+    try {
+      const payload = await startCollectiveOnlinePayment(id);
+      if (payload.alreadyConfirmed) {
+        await loadCheckout();
+        setMessage("Payment Already Recorded");
+        return;
+      }
+      setMockPayment(payload);
+    } catch (error) {
+      setMessage(error.message || "Could not start mock online payment.");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function confirmOnlinePayment() {
+    setProcessing(true);
     setMessage("");
 
     try {
-      const payload = await payCollectiveCheckout(id, {
+      const payload = await confirmCollectiveOnlinePayment(id, {
         deliveryAddress: address,
-        paymentMethod,
+        paymentReference: mockPayment?.paymentReference,
       });
 
+      setMockPayment(null);
       setCheckout(payload.checkout);
-      setMessage(payload.message || "Payment recorded successfully");
       window.dispatchEvent(new Event("notificationsUpdated"));
 
-      if (payload.completed) {
-        setTimeout(() => navigate(`/collective/session/${id}`), 900);
+      if (payload.completed && payload.order?.id) {
+        navigate(`/collective/order/${payload.order.id}`);
+        return;
       }
+
+      setMessage(payload.message || "Online payment confirmed successfully");
     } catch (error) {
-      setMessage(error.message || "Payment could not be recorded.");
+      setMessage(error.message || "Online payment could not be confirmed.");
     } finally {
-      setPaying(false);
+      setProcessing(false);
+    }
+  }
+
+  async function confirmCod() {
+    setProcessing(true);
+    setMessage("");
+
+    try {
+      const payload = await confirmCollectiveCod(id, { deliveryAddress: address });
+      setCheckout(payload.checkout);
+      window.dispatchEvent(new Event("notificationsUpdated"));
+
+      if (payload.completed && payload.order?.id) {
+        navigate(`/collective/order/${payload.order.id}`);
+        return;
+      }
+
+      setMessage(payload.message || "COD confirmed. Your share will be collected on delivery.");
+    } catch (error) {
+      setMessage(error.message || "COD could not be confirmed.");
+    } finally {
+      setProcessing(false);
     }
   }
 
@@ -95,7 +172,8 @@ export default function CollectiveCheckout() {
   }
 
   const product = checkout.product || checkout.session?.product || {};
-  const alreadyPaid = checkout.currentUserPaymentStatus === "paid";
+  const status = checkout.currentUserPaymentStatus || "pending";
+  const isConfirmed = status === "paid" || status === "cod_confirmed";
 
   return (
     <section className="orders-page">
@@ -107,7 +185,7 @@ export default function CollectiveCheckout() {
         </div>
 
         {message && (
-          <div className={message.toLowerCase().includes("success") || message.toLowerCase().includes("completed") ? "orders-success" : "orders-error"}>
+          <div className={message.toLowerCase().includes("confirmed") || message.toLowerCase().includes("recorded") ? "orders-success" : "orders-error"}>
             {message}
           </div>
         )}
@@ -141,39 +219,71 @@ export default function CollectiveCheckout() {
             <div className="checkout-totals">
               <div className="checkout-total-row"><span>Total Members</span><span>{checkout.totalMembers}</span></div>
               <div className="checkout-total-row checkout-grand"><span>Each User Pays</span><strong>{formatMoney(checkout.perUserAmount)}</strong></div>
-              <div className="checkout-total-row"><span>Your Payment Status</span><span className={`cb-pay-badge ${alreadyPaid ? "paid" : ""}`}>{checkout.currentUserPaymentStatus}</span></div>
+              <div className="checkout-total-row">
+                <span>Your Payment Status</span>
+                <span className={`cb-pay-badge ${isConfirmed ? "paid" : ""}`}>{statusLabel(status)}</span>
+              </div>
             </div>
           </div>
 
-          <form className="checkout-card cb-checkout-form" onSubmit={handlePayment}>
+          <div className="checkout-card">
+            <h2 className="checkout-card-title">Members Payment Status</h2>
+            <div className="cb-member-status-list">
+              {(checkout.members || []).map((member) => (
+                <div key={member.userId} className="checkout-total-row">
+                  <span>{member.name}</span>
+                  <strong>{statusLabel(member.paymentStatus)}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <form className="checkout-card cb-checkout-form" onSubmit={handleSubmit}>
             <h2 className="checkout-card-title">Delivery Address</h2>
             <div className="cb-address-grid">
-              <input value={address.fullName} onChange={(e) => updateAddress("fullName", e.target.value)} placeholder="Full name" required />
-              <input value={address.phone} onChange={(e) => updateAddress("phone", e.target.value)} placeholder="Phone number" required />
-              <input value={address.addressLine1} onChange={(e) => updateAddress("addressLine1", e.target.value)} placeholder="Address line 1" required />
-              <input value={address.addressLine2} onChange={(e) => updateAddress("addressLine2", e.target.value)} placeholder="Address line 2" />
-              <input value={address.city} onChange={(e) => updateAddress("city", e.target.value)} placeholder="City" required />
-              <input value={address.state} onChange={(e) => updateAddress("state", e.target.value)} placeholder="State" required />
-              <input value={address.pincode} onChange={(e) => updateAddress("pincode", e.target.value)} placeholder="Pincode" required />
-              <input value={address.country} onChange={(e) => updateAddress("country", e.target.value)} placeholder="Country" required />
+              <input value={address.fullName} onChange={(e) => updateAddress("fullName", e.target.value)} placeholder="Full name" required disabled={isConfirmed} />
+              <input value={address.phone} onChange={(e) => updateAddress("phone", e.target.value)} placeholder="Phone number" required disabled={isConfirmed} />
+              <input value={address.addressLine1} onChange={(e) => updateAddress("addressLine1", e.target.value)} placeholder="Address line 1" required disabled={isConfirmed} />
+              <input value={address.addressLine2} onChange={(e) => updateAddress("addressLine2", e.target.value)} placeholder="Address line 2" disabled={isConfirmed} />
+              <input value={address.city} onChange={(e) => updateAddress("city", e.target.value)} placeholder="City" required disabled={isConfirmed} />
+              <input value={address.state} onChange={(e) => updateAddress("state", e.target.value)} placeholder="State" required disabled={isConfirmed} />
+              <input value={address.pincode} onChange={(e) => updateAddress("pincode", e.target.value)} placeholder="Pincode" required disabled={isConfirmed} />
+              <input value={address.country} onChange={(e) => updateAddress("country", e.target.value)} placeholder="Country" required disabled={isConfirmed} />
             </div>
 
             <h2 className="checkout-card-title">Payment Method</h2>
-            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} disabled={alreadyPaid}>
-              <option value="cod">Cash on Delivery</option>
+            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} disabled={isConfirmed}>
               <option value="mock_online">Mock Online Payment</option>
+              <option value="cash_on_delivery">Cash on Delivery</option>
             </select>
 
-            <button type="submit" className="checkout-place-btn" disabled={paying || alreadyPaid}>
-              {alreadyPaid ? "Payment Already Recorded" : paying ? "Recording Payment..." : "Confirm My Payment"}
+            <button type="submit" className="checkout-place-btn" disabled={processing || isConfirmed}>
+              {isConfirmed
+                ? "Payment Already Recorded"
+                : processing
+                  ? "Please wait..."
+                  : paymentMethod === "mock_online"
+                    ? "Proceed to Online Payment"
+                    : "Confirm COD Order"}
             </button>
 
-            {checkout.allMembersPaid && (
-              <p className="cb-complete-note">Collective order completed.</p>
+            {status === "cod_confirmed" && (
+              <p className="cb-complete-note">COD confirmed. Your share will be collected on delivery.</p>
+            )}
+            {checkout.allMembersConfirmed && (
+              <p className="cb-complete-note">All members have confirmed. Collective order is ready.</p>
             )}
           </form>
         </div>
       </div>
+
+      <MockPaymentGatewayModal
+        payment={mockPayment}
+        productName={product.name || product.title}
+        confirming={processing}
+        onCancel={() => setMockPayment(null)}
+        onConfirm={confirmOnlinePayment}
+      />
     </section>
   );
 }

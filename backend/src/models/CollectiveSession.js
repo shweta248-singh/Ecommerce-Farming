@@ -7,21 +7,20 @@ const collectiveMemberSchema = new mongoose.Schema(
     joinedAt: { type: Date, default: Date.now },
     paymentStatus: {
       type: String,
-      enum: ["pending", "paid", "failed", "refunded"],
+      enum: ["pending", "paid", "cod_confirmed", "failed", "refunded"],
       default: "pending",
     },
-    paidAmount: { type: Number, default: 0 },
-    paidAt: Date,
-    deliveryAddress: {
-      fullName: String,
-      phone: String,
-      addressLine1: String,
-      addressLine2: String,
-      city: String,
-      state: String,
-      pincode: String,
-      country: { type: String, default: "India" },
+    paymentMethod: {
+      type: String,
+      enum: ["mock_online", "cash_on_delivery", null],
+      default: null,
     },
+    paidAmount: { type: Number, default: 0 },
+    payableAmount: { type: Number, default: 0 },
+    paidAt: Date,
+    confirmedAt: Date,
+    paymentReference: String,
+    deliveryAddress: Object,
   },
   { _id: false }
 );
@@ -44,11 +43,19 @@ const collectiveSessionSchema = new mongoose.Schema(
     perUserAmount: { type: Number, default: 0 },
     paymentStatus: {
       type: String,
-      enum: ["pending", "partially_paid", "paid"],
+      enum: [
+        "pending",
+        "partially_confirmed",
+        "confirmed",
+        "paid",
+        "cod_pending",
+        "partially_paid_cod_pending",
+      ],
       default: "pending",
     },
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: "Order" },
     completedAt: Date,
+    confirmedAt: Date,
     expiresAt: { type: Date, required: true },
   },
   {

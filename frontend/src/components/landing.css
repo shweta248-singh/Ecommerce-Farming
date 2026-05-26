@@ -7866,6 +7866,53 @@ body {
   font-weight: 900;
 }
 
+.cb-payment-modal {
+  max-width: 620px;
+}
+
+.cb-gateway-box {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 18px;
+  align-items: center;
+  margin: 18px 0;
+}
+
+.cb-qr-placeholder {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  width: 180px;
+  height: 180px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, #0f172a 10px, transparent 10px) 0 0 / 28px 28px,
+    linear-gradient(#0f172a 10px, transparent 10px) 0 0 / 28px 28px,
+    #fff;
+  color: #0f172a;
+}
+
+.cb-qr-placeholder span {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  background: #fff;
+  border: 8px solid #15803d;
+}
+
+.cb-member-status-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cb-order-confirm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
 @media (max-width: 760px) {
   .cb-session-layout {
     grid-template-columns: 1fr;
@@ -7876,7 +7923,9 @@ body {
   }
 
   .cb-checkout-grid,
-  .cb-address-grid {
+  .cb-address-grid,
+  .cb-order-confirm-grid,
+  .cb-gateway-box {
     grid-template-columns: 1fr;
   }
 }
