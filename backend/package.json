@@ -29,6 +29,7 @@
     "multer": "^2.1.1",
     "nodemailer": "^8.0.5",
     "nodemon": "^3.1.14",
-    "openai": "^6.34.0"
+    "openai": "^6.34.0",
+    "qrcode": "^1.5.4"
   }
 }

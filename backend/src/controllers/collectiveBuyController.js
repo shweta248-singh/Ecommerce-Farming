@@ -10,6 +10,11 @@ import { getNextDiscountMilestone } from "../services/discountService.js";
 import { calculateSplitPayment } from "../services/splitPaymentService.js";
 import { sendCollectiveInviteEmail } from "../utils/sendEmail.js";
 import { sendCollectiveOrderEmail } from "../services/orderEmailService.js";
+import {
+  generateUpiPaymentString,
+  generateUpiQrCode,
+  getMerchantUpiConfig,
+} from "../services/upiPaymentService.js";
 
 const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -885,12 +890,24 @@ export const startCollectiveOnlinePayment = async (req, res) => {
 
     const paymentReference = generateMockPaymentReference(session._id, req.user.id);
     const amount = roundMoney(session.perUserAmount);
+    const { merchantUpiId, merchantName } = getMerchantUpiConfig();
+    const upiPaymentString = generateUpiPaymentString({
+      upiId: merchantUpiId,
+      merchantName,
+      amount,
+      transactionNote: `AgroMitra collective ${product.name || product.title}`,
+      transactionRef: paymentReference,
+    });
+    const qrCodeDataUrl = await generateUpiQrCode(upiPaymentString);
 
     return res.json({
       success: true,
       amount,
       paymentReference,
-      mockQrData: `agromitra://collective-pay?sessionId=${session._id}&userId=${req.user.id}&amount=${amount}&ref=${paymentReference}`,
+      upiPaymentString,
+      qrCodeDataUrl,
+      merchantUpiId,
+      merchantName,
       sessionId: session.id,
       productName: product.name || product.title,
     });
