@@ -27,3 +27,20 @@ export const getCollectiveInvite = (inviteId) =>
 
 export const getCollectiveSession = (sessionId) =>
   apiRequest(`/collective-buy/session/${sessionId}`);
+
+export const getMyCollectiveSessions = () =>
+  apiRequest("/collective-buy/my-sessions");
+
+export const getCollectiveCheckout = (sessionId) =>
+  apiRequest(`/collective-buy/checkout/${sessionId}`);
+
+export const payCollectiveCheckout = (sessionId, payload) =>
+  apiRequest(`/collective-buy/checkout/${sessionId}/pay`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const completeCollectiveCheckout = (sessionId) =>
+  apiRequest(`/collective-buy/checkout/${sessionId}/complete`, {
+    method: "POST",
+  });

@@ -5,6 +5,23 @@ const collectiveMemberSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     quantity: { type: Number, min: 1, default: 1 },
     joinedAt: { type: Date, default: Date.now },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "failed", "refunded"],
+      default: "pending",
+    },
+    paidAmount: { type: Number, default: 0 },
+    paidAt: Date,
+    deliveryAddress: {
+      fullName: String,
+      phone: String,
+      addressLine1: String,
+      addressLine2: String,
+      city: String,
+      state: String,
+      pincode: String,
+      country: { type: String, default: "India" },
+    },
   },
   { _id: false }
 );
@@ -25,6 +42,13 @@ const collectiveSessionSchema = new mongoose.Schema(
     originalPrice: { type: Number, default: 0 },
     discountedPrice: { type: Number, default: 0 },
     perUserAmount: { type: Number, default: 0 },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "partially_paid", "paid"],
+      default: "pending",
+    },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: "Order" },
+    completedAt: Date,
     expiresAt: { type: Date, required: true },
   },
   {

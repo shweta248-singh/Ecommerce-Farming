@@ -215,6 +215,43 @@ export const sendCollectiveInviteEmail = async ({
   });
 };
 
+export const sendCollectiveOrderConfirmedEmail = async ({
+  email,
+  name,
+  productName,
+  paidAmount,
+  orderId,
+  frontendUrl,
+}) => {
+  const displayName = name || "AgroMitra user";
+  const displayProduct = productName || "your collective product";
+  const appOrigin =
+    String(frontendUrl || "").replace(/\/$/, "") ||
+    "https://ecommerce-farming-frontend.onrender.com";
+  const orderUrl = `${appOrigin}/my-orders`;
+
+  return sendTransactionalEmail({
+    to: email,
+    subject: "Collective buying order confirmed",
+    text: `Hi ${displayName}, your collective buying order for ${displayProduct} has been confirmed. Order ID: ${orderId}.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <h2 style="color: #15803d;">Collective Order Confirmed</h2>
+        <p>Hi ${displayName},</p>
+        <p>All members have paid. Your collective buying order has been confirmed.</p>
+        <p><strong>Product:</strong> ${displayProduct}</p>
+        ${paidAmount !== undefined && paidAmount !== null ? `<p><strong>Your paid amount:</strong> Rs.${paidAmount}</p>` : ""}
+        <p><strong>Order ID:</strong> ${orderId}</p>
+        <p>
+          <a href="${orderUrl}" style="display:inline-block;background:#15803d;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:6px;font-weight:700;">
+            View Orders
+          </a>
+        </p>
+      </div>
+    `,
+  });
+};
+
 export const sendEmail = async (email, otp) => {
   try {
     const emailContent = buildOtpEmail(otp);

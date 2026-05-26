@@ -41,12 +41,33 @@ const orderSchema = new mongoose.Schema(
     address_id: { type: mongoose.Schema.Types.ObjectId, ref: "Address" },
     address: Object,
     payments: [paymentSchema],
+    orderType: { type: String, enum: ["standard", "collective"], default: "standard" },
+    sessionId: { type: mongoose.Schema.Types.ObjectId, ref: "CollectiveSession" },
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    members: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        quantity: Number,
+        paidAmount: Number,
+        paidAt: Date,
+        deliveryAddress: Object,
+      },
+    ],
+    originalPrice: Number,
+    discountPercentage: Number,
+    discountedPrice: Number,
+    totalAmount: Number,
   },
   {
     timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
     toJSON: { virtuals: true, versionKey: false },
     toObject: { virtuals: true, versionKey: false },
   }
+);
+
+orderSchema.index(
+  { sessionId: 1, orderType: 1 },
+  { unique: true, partialFilterExpression: { orderType: "collective" } }
 );
 
 orderSchema.virtual("id").get(function () {
